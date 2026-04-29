@@ -393,18 +393,9 @@ export class HybridAREngine {
       //      → tránh bị "nhảy" khi switch
       this._camera.updateMatrixWorld(true);
 
-      // SNAP wrapper vào anchor hiện tại (không lerp) → loại bỏ "lệch lerp dở dang"
-      for (const item of this._items) {
-        if (!item.locked || !item.tracking) continue;
-        item.anchor.group.updateMatrixWorld(true);
-        const m = item.anchor.group.matrixWorld;
-        item.wrapper.matrix.copy(m);
-        item.wrapper.matrix.decompose(
-          item.wrapper.position,
-          item.wrapper.quaternion,
-          item.wrapper.scale
-        );
-      }
+      // KHÔNG snap wrapper sang anchor nữa → giữ nguyên giá trị lerp
+      // hiện tại để tránh "nhảy vị trí" khi user bấm Quan sát đúng lúc
+      // đang di chuyển điện thoại.
       const currentCamQuat = new THREE.Quaternion();
       const currentCamPos = new THREE.Vector3();
       const currentCamScale = new THREE.Vector3();
@@ -488,6 +479,13 @@ export class HybridAREngine {
       item.locked = false;
       item.tracking = false;
       item.wrapper.visible = false;
+      // Xóa mọi xoay/zoom user đã áp → lần lock sau bắt đầu sạch
+      item.wrapper.position.set(0, 0, 0);
+      item.wrapper.quaternion.identity();
+      item.wrapper.scale.set(1, 1, 1);
+      item.wrapper.matrix.identity();
+      item.wrapper.matrixWorld.identity();
+      item.userZoom = 1;
     }
 
     // Trả quyền camera matrix cho MindAR
@@ -495,6 +493,10 @@ export class HybridAREngine {
     this._camera.position.set(0, 0, 0);
     this._camera.quaternion.identity();
     this._camera.scale.set(1, 1, 1);
+    // Reset cả matrix + matrixWorld (nếu không, giá trị gyro cũ vẫn tồn tại
+    // đến khi MindAR detect anchor mới và ghi đè → model render sai chỗ)
+    this._camera.matrix.identity();
+    this._camera.matrixWorld.identity();
 
     const hint = document.getElementById("scan-hint");
     if (hint) hint.style.display = "flex";
