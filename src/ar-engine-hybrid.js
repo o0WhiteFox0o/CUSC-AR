@@ -46,13 +46,20 @@ export class HybridAREngine {
   async init(onProgress = () => {}) {
     onProgress("Đang khởi tạo camera & AR engine...");
 
+    // Tracking params: cho phép user override qua AR_CONFIG.tracking
+    const t = this._config.tracking ?? {};
     this._mindarThree = new MindARThree({
       container: this._container,
       imageTargetSrc: this._config.mindFile,
-      filterMinCF: 0.0001,
-      filterBeta: 0.001,
-      warmupTolerance: 2,
-      missTolerance: 30,
+      // Đã tune để detect nhanh + chịu được góc nghiêng:
+      //   - filterMinCF thấp → đổi vị trí tức thời (mặc dù noisy)
+      //   - filterBeta cao → ít smoothing → phản hồi nhanh
+      //   - warmupTolerance: 1 → lock ngay frame đầu nhìn thấy
+      //   - missTolerance cao → không bỏ mất khi marker lô nhẹ
+      filterMinCF: t.filterMinCF ?? 0.001,
+      filterBeta: t.filterBeta ?? 0.01,
+      warmupTolerance: t.warmupTolerance ?? 1,
+      missTolerance: t.missTolerance ?? 60,
       uiLoading: "no",
       uiScanning: "no",
       uiError: "no",
@@ -72,20 +79,58 @@ export class HybridAREngine {
     dir.position.set(0.5, 1, 0.25);
     scene.add(dir);
 
-    const autoFitSize = this._config.autoFitSize ?? 0;
+    const globalAutoFit = this._config.autoFitSize ?? 0;
 
-    for (const target of this._config.targets) {
-      onProgress(`Đang tải model: ${target.modelUrl}`);
-      const anchor = this._mindarThree.addAnchor(target.targetIndex);
+    // Lấy danh sách models từ config mới (models[]) hoặc fallback targets[] cũ
+    const modelDefs = this._config.models ?? this._config.targets?.map((t) => ({
+      ...t,
+      targets: [{ targetIndex: t.targetIndex, surface: t.surface ?? "floor" }],
+    })) ?? [];
 
+    for (const modelDef of modelDefs) {
+      onProgress(`Đang tải model: ${modelDef.modelUrl}`);
+
+      let baseGltf;
       try {
-        const { scene: modelScene, animations } = await this._modelLoader.load(
-          target.modelUrl
-        );
+        baseGltf = await this._modelLoader.load(modelDef.modelUrl);
+      } catch (err) {
+        console.error(`Không thể tải model ${modelDef.modelUrl}:`, err);
+        continue;
+      }
 
-        const { position: p, rotation: r, scale: s } = target;
+      const autoFitSize = modelDef.autoFitSize ?? globalAutoFit;
+      const animationIndex = modelDef.animation ?? null;
+
+      for (const targetDef of (modelDef.targets ?? [])) {
+        let anchor;
+        try {
+          anchor = this._mindarThree.addAnchor(targetDef.targetIndex);
+        } catch (err) {
+          console.warn(
+            `[AR] targetIndex ${targetDef.targetIndex} không tồn tại trong file .mind ` +
+            `(model: ${modelDef.id}). Bỏ qua. Hãy compile lại .mind với đủ ảnh.`
+          );
+          continue;
+        }
+        const surface = targetDef.surface ?? "floor";
+
+        // Clone scene riêng cho mỗi target để không chia sẻ transform
+        const modelScene = baseGltf.scene.clone(true);
+        const animations = baseGltf.animations;
+
+        const p = modelDef.position ?? { x: 0, y: 0, z: 0 };
+        const s = modelDef.scale   ?? { x: 1, y: 1, z: 1 };
+        const r = modelDef.rotation;
+
         modelScene.position.set(p.x, p.y, p.z);
-        modelScene.rotation.set(r.x, r.y, r.z);
+
+        // Rotation mặc định theo surface nếu không khai báo rõ
+        const defaultRotX = surface === "wall" ? 0 : Math.PI / 2;
+        modelScene.rotation.set(
+          r?.x ?? defaultRotX,
+          r?.y ?? 0,
+          r?.z ?? 0
+        );
         modelScene.scale.set(s.x, s.y, s.z);
 
         if (autoFitSize > 0) {
@@ -103,13 +148,18 @@ export class HybridAREngine {
         scene.add(wrapper);
 
         const item = {
-          targetIndex: target.targetIndex,
+          targetIndex: targetDef.targetIndex,
           anchor,
           wrapper,
           modelScene,
-          def: target,
+          def: modelDef,
+          surface,
           locked: false,
           tracking: false,
+          animations,
+          currentClipIndex: typeof animationIndex === "number" ? animationIndex : 0,
+          mixer: null,
+          userZoom: 1,
         };
 
         anchor.onTargetFound = () => {
@@ -120,21 +170,15 @@ export class HybridAREngine {
           item.tracking = false;
         };
 
-        item.animations = animations;
-        item.currentClipIndex =
-          typeof target.animation === "number" ? target.animation : 0;
-
-        if (target.animation != null && animations.length > 0) {
+        if (animationIndex != null && animations.length > 0) {
           item.mixer = this._modelLoader.playAnimation(
             modelScene,
             animations,
-            target.animation
+            animationIndex
           );
         }
 
         this._items.push(item);
-      } catch (err) {
-        console.error(`Không thể tải model ${target.modelUrl}:`, err);
       }
     }
 
@@ -317,15 +361,20 @@ export class HybridAREngine {
   }
 
   /**
-   * Xoay model đã lock quanh trục UP **vật lý** (= pháp tuyến marker
-   * = trục Z local của wrapper, vì wrapper inherit matrix của marker).
+   * Xoay model đã lock quanh trục UP **vật lý** (= pháp tuyến marker).
+   *   - Floor (marker nằm ngang): wrapper local Z = up → rotateZ
+   *   - Wall  (marker đứng):       wrapper local Y = up → rotateY
    * @param {number} deltaAngle  – radians
    */
   rotateModel(deltaAngle = 0) {
     if (!deltaAngle) return;
     for (const item of this._items) {
       if (!item.locked) continue;
-      item.wrapper.rotateZ(deltaAngle);
+      if (item.surface === "wall") {
+        item.wrapper.rotateY(deltaAngle);
+      } else {
+        item.wrapper.rotateZ(deltaAngle);
+      }
     }
   }
 

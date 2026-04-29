@@ -6,3 +6,7 @@ dist
 .env
 .env.local
 .vscode/settings.json
+
+# Intermediate .mind exports (duplicates) – chỉ giữ public/assets/targets/targets.mind
+assets/targets/spinosaurus/
+assets/targets/triceratops/
