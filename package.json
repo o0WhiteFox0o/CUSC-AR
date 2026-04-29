@@ -1,0 +1,21 @@
+{
+  "name": "cusc-ar",
+  "version": "1.0.0",
+  "description": "Web AR framework – hiển thị model 3D khi camera quét ảnh mục tiêu",
+  "private": true,
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview --host"
+  },
+  "keywords": ["ar", "webxr", "mindar", "threejs", "image-tracking"],
+  "license": "MIT",
+  "dependencies": {
+    "mind-ar": "^1.2.5",
+    "three": "^0.153.0"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0",
+    "@vitejs/plugin-basic-ssl": "^1.1.0"
+  }
+}

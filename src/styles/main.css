@@ -1,0 +1,318 @@
+/* ===== Reset & Base ===== */
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, sans-serif;
+  color: #fff;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ===== AR Container ===== */
+#ar-container {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+}
+
+#ar-container canvas,
+#ar-container video {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+}
+
+/* ===== Loading Overlay ===== */
+#loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.85);
+  gap: 1rem;
+}
+
+.spinner {
+  width: 48px;
+  height: 48px;
+  border: 4px solid rgba(255, 255, 255, 0.2);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+#loading-text {
+  font-size: 0.95rem;
+  opacity: 0.8;
+}
+
+/* ===== UI Overlay ===== */
+#ui-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+}
+
+#scan-hint {
+  position: absolute;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+#scan-hint p {
+  font-size: 0.85rem;
+  text-align: center;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ===== World-tracking UI ===== */
+#place-hint {
+  position: absolute;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.55);
+  padding: 0.6rem 1rem;
+  border-radius: 999px;
+  max-width: 90%;
+  display: none;
+}
+#place-hint p {
+  font-size: 0.85rem;
+  text-align: center;
+}
+#place-hint.hidden { display: none !important; }
+
+body.mode-world #scan-hint { display: none !important; }
+body.mode-world #place-hint { display: block; }
+body.mode-image #place-hint,
+body.mode-image #model-picker { display: none !important; }
+/* btn-gyro & btn-reset: HybridAREngine tự quản lý hiển thị trong mode-image */
+
+/* Model picker */
+#model-picker {
+  position: absolute;
+  bottom: 6rem;
+  left: 0;
+  right: 0;
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  padding: 0 1rem;
+  pointer-events: auto;
+}
+.picker-btn {
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 0.5rem 1rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.picker-btn.active {
+  background: #33ff88;
+  color: #003322;
+  border-color: #33ff88;
+  font-weight: 600;
+}
+
+/* Reset button */
+#btn-reset {
+  position: absolute;
+  bottom: 1.2rem;
+  right: 1.2rem;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 1.5rem;
+  cursor: pointer;
+  pointer-events: auto;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+#btn-reset:active { transform: scale(0.92); }
+
+/* Gyro button */
+#btn-gyro {
+  position: absolute;
+  bottom: 1.2rem;
+  left: 1.2rem;
+  padding: 0.6rem 1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 0.85rem;
+  cursor: pointer;
+  pointer-events: auto;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+#btn-gyro.active {
+  background: #33ff88;
+  color: #003322;
+  border-color: #33ff88;
+  font-weight: 600;
+}
+
+/* ===== Info popup (tap model) ===== */
+#info-popup {
+  position: absolute;
+  left: 50%;
+  bottom: 5.5rem;
+  transform: translateX(-50%) translateY(20px);
+  width: min(92vw, 420px);
+  padding: 1rem 1.2rem 1.1rem;
+  background: rgba(20, 20, 28, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  color: #fff;
+  pointer-events: auto;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.22s ease, transform 0.22s ease, visibility 0.22s;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  z-index: 30;
+}
+#info-popup.visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+#info-popup h3 {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 0.45rem;
+  padding-right: 1.6rem;
+  color: #33ff88;
+}
+#info-popup p {
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.88);
+}
+#info-close {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.5rem;
+  width: 30px;
+  height: 30px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+#info-close:active { transform: scale(0.9); }
+
+/* ===== Model controls (chế độ Quan sát) ===== */
+#model-controls {
+  position: absolute;
+  right: 1.2rem;
+  bottom: 5.2rem;
+  display: none;
+  flex-direction: column;
+  gap: 0.4rem;
+  pointer-events: auto;
+  z-index: 25;
+}
+#model-controls.visible { display: flex; }
+.ctrl-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 1.2rem;
+  font-weight: 600;
+  cursor: pointer;
+  pointer-events: auto;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+.ctrl-btn:active {
+  transform: scale(0.92);
+  background: rgba(51, 255, 136, 0.25);
+  border-color: #33ff88;
+}
+
+/* ===== Debug overlay ===== */
+#debug-overlay {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  max-width: 60vw;
+  max-height: 60vh;
+  overflow: auto;
+  padding: 0.4rem 0.6rem;
+  background: rgba(0, 0, 0, 0.65);
+  color: #9fffc8;
+  font-family: ui-monospace, "Consolas", monospace;
+  font-size: 10px;
+  line-height: 1.25;
+  border-radius: 6px;
+  pointer-events: none;
+  white-space: pre;
+  z-index: 40;
+}
+
+/* Three.js ARButton override */
+#ar-start-button,
+button.webxr-ar-button,
+button[data-ar-button] {
+  position: fixed !important;
+  bottom: 1.5rem !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  padding: 0.85rem 1.6rem !important;
+  font-size: 0.95rem !important;
+  font-weight: 600 !important;
+  background: #33ff88 !important;
+  color: #003322 !important;
+  border: none !important;
+  border-radius: 999px !important;
+  z-index: 50 !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4) !important;
+}

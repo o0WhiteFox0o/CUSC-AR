@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <title>CUSC-AR</title>
+  <link rel="stylesheet" href="src/styles/main.css" />
+</head>
+<body>
+  <!-- Loading overlay -->
+  <div id="loading-overlay">
+    <div class="spinner"></div>
+    <p id="loading-text">Đang khởi tạo AR...</p>
+  </div>
+
+  <!-- UI overlay -->
+  <div id="ui-overlay" style="display:none;">
+    <!-- Image-tracking hint -->
+    <div id="scan-hint">
+      <img src="assets/icons/scan.svg" alt="scan" width="48" height="48" />
+      <p>Hướng camera vào ảnh Shrimp để spawn Spinosaurus</p>
+    </div>
+
+    <!-- World-tracking hint -->
+    <div id="place-hint">
+      <p id="place-hint-text">Xoay điện thoại quanh phòng để khám phá 🦕</p>
+    </div>
+
+    <!-- Chọn model (hiện khi có ≥ 2 model markerless) -->
+    <div id="model-picker"></div>
+
+    <!-- Bật cảm biến hướng để xoay nhìn quanh model sau khi đã lock -->
+    <button id="btn-gyro" type="button" title="Bật chế độ quan sát">Quan sát</button>
+
+    <!-- Đặt lại model trước mặt -->
+    <button id="btn-reset" type="button" title="Đặt lại model">⟳</button>
+
+    <!-- Cụm điều khiển model (chỉ hiện ở chế độ Quan sát) -->
+    <div id="model-controls" aria-hidden="true">
+      <button class="ctrl-btn" data-act="rot-left"  type="button" title="Xoay trái">⟲</button>
+      <button class="ctrl-btn" data-act="rot-right" type="button" title="Xoay phải">⟳</button>
+      <button class="ctrl-btn" data-act="zoom-out"  type="button" title="Thu nhỏ">−</button>
+      <button class="ctrl-btn" data-act="zoom-in"   type="button" title="Phóng to">+</button>
+    </div>
+
+    <!-- Popup thông tin model (hiện khi tap vào model) -->
+    <div id="info-popup" role="dialog" aria-hidden="true">
+      <button id="info-close" type="button" aria-label="Đóng">×</button>
+      <h3 id="info-title"></h3>
+      <p id="info-desc"></p>
+    </div>
+
+    <!-- Debug overlay -->
+    <pre id="debug-overlay"></pre>
+  </div>
+
+  <!-- AR container – MindAR + Three.js will render here -->
+  <div id="ar-container"></div>
+
+  <!-- App entry (Vite handles all bundling) -->
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
