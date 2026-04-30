@@ -19,22 +19,20 @@
     <!-- Image-tracking hint -->
     <div id="scan-hint">
       <img src="assets/icons/scan.svg" alt="scan" width="48" height="48" />
-      <p>Hướng camera vào ảnh Shrimp để spawn Spinosaurus</p>
+      <p>Hướng camera vào marker để spawn model</p>
     </div>
-
-    <!-- World-tracking hint -->
-    <div id="place-hint">
-      <p id="place-hint-text">Xoay điện thoại quanh phòng để khám phá 🦕</p>
-    </div>
-
-    <!-- Chọn model (hiện khi có ≥ 2 model markerless) -->
-    <div id="model-picker"></div>
 
     <!-- Bật cảm biến hướng để xoay nhìn quanh model sau khi đã lock -->
     <button id="btn-gyro" type="button" title="Bật chế độ quan sát">Quan sát</button>
 
     <!-- Đặt lại model trước mặt -->
     <button id="btn-reset" type="button" title="Đặt lại model">⟳</button>
+
+    <!-- Toggle bảng debug -->
+    <button id="btn-debug" type="button" title="Hiện/ẩn bảng thông số">≡</button>
+
+    <!-- Trạng thái scan (marker hiện tại trong cycle) -->
+    <div id="scan-status" aria-live="polite"></div>
 
     <!-- Cụm điều khiển model (chỉ hiện ở chế độ Quan sát) -->
     <div id="model-controls" aria-hidden="true">
@@ -52,7 +50,7 @@
     </div>
 
     <!-- Debug overlay -->
-    <pre id="debug-overlay"></pre>
+    <pre id="debug-overlay" hidden></pre>
   </div>
 
   <!-- AR container – MindAR + Three.js will render here -->

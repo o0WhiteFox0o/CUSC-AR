@@ -1,15 +1,13 @@
 /**
- * main.js – Entry point cho CUSC-AR
+ * src/main.js – Entry point CUSC-AR
  *
- * Mode được chọn bởi AR_CONFIG.mode:
- *   - "image": MindAR image tracking (model bám vào ảnh marker)
- *   - "world": Gyro – model đặt cố định trong phòng ảo quanh user
+ * Chỉ còn 1 chế độ: image marker + hybrid (lock + gyro).
+ * Mọi data model nằm ở src/models.js, mọi tham số engine ở src/ar-config.js.
  */
 
 import AR_CONFIG from "./ar-config.js";
-import { AREngine } from "./ar-engine.js";
+import MODELS from "./models.js";
 import { HybridAREngine } from "./ar-engine-hybrid.js";
-import { GyroAREngine } from "./ar-engine-gyro.js";
 
 const loadingOverlay = document.getElementById("loading-overlay");
 const loadingText = document.getElementById("loading-text");
@@ -20,203 +18,149 @@ const setProgress = (msg) => {
   if (loadingText) loadingText.textContent = msg;
 };
 
-async function startImageMode() {
-  // Mặc định dùng HybridAREngine: marker chỉ là "điểm spawn + scale".
-  // Model được khoá vào không gian, không biến mất khi marker khuất / xiên.
-  // Đặt AR_CONFIG.mode = "image-strict" để dùng AREngine cũ (model bám phẳng trên marker).
-  const useHybrid = AR_CONFIG.mode !== "image-strict";
-  const engine = useHybrid
-    ? new HybridAREngine(arContainer, AR_CONFIG)
-    : new AREngine(arContainer, AR_CONFIG);
+async function bootstrap() {
+  console.log("[CUSC-AR] models =", MODELS.map((m) => m.id).join(", "));
 
-  await engine.init(setProgress);
-  await engine.start();
+  const engine = new HybridAREngine(arContainer, AR_CONFIG, MODELS);
 
-  // Bật debug overlay
+  try {
+    await engine.init(setProgress);
+    await engine.start();
+  } catch (err) {
+    console.error("[CUSC-AR] init failed:", err);
+    setProgress("Lỗi: " + (err?.message ?? err));
+    return;
+  }
+
+  // Debug overlay (ẩn mặc định, toggle bằng nút #btn-debug)
   const debugEl = document.getElementById("debug-overlay");
   if (debugEl && engine.enableDebug) engine.enableDebug(debugEl);
+  const debugBtn = document.getElementById("btn-debug");
+  if (debugBtn && debugEl) {
+    debugBtn.addEventListener("click", () => {
+      const willShow = debugEl.hasAttribute("hidden");
+      if (willShow) debugEl.removeAttribute("hidden");
+      else debugEl.setAttribute("hidden", "");
+      debugBtn.classList.toggle("active", willShow);
+    });
+  }
 
   loadingOverlay.style.display = "none";
   uiOverlay.style.display = "block";
   document.body.classList.add("mode-image");
 
-  const anchors = engine.getAnchors();
-  anchors.forEach(({ anchor }, index) => {
-    const origFound = anchor.onTargetFound;
-    const origLost = anchor.onTargetLost;
-    anchor.onTargetFound = () => {
-      origFound?.();
-      const hint = document.getElementById("scan-hint");
-      if (hint) hint.style.display = "none";
-    };
-    anchor.onTargetLost = () => {
-      origLost?.();
-      // Hybrid: KHÔNG hiện lại scan hint vì model vẫn còn đó
-      if (!useHybrid) {
-        const hint = document.getElementById("scan-hint");
-        if (hint) hint.style.display = "flex";
-      }
-    };
+  // Scan status hiển thị marker hiện tại đang quét
+  const scanStatus = document.getElementById("scan-status");
+  engine.setOnStatus?.((s) => {
+    if (!scanStatus) return;
+    if (s.stage === "scanning" || s.stage === "switching") {
+      scanStatus.textContent = `Đang quét: ${s.markerName ?? "…"}`;
+      scanStatus.classList.remove("tracking");
+    } else if (s.stage === "tracking") {
+      scanStatus.textContent = `Thấy: ${s.markerName ?? ""}`;
+      scanStatus.classList.add("tracking");
+    } else if (s.stage === "snapshot") {
+      scanStatus.textContent = `Quan sát: ${s.markerName ?? ""}`;
+      scanStatus.classList.add("tracking");
+    }
   });
 
-  // Reset = scan lại (chỉ áp dụng hybrid)
-  if (useHybrid) {
-    document.getElementById("btn-reset")?.addEventListener("click", async () => {
-      await engine.resetLock();
-      const hint = document.getElementById("scan-hint");
-      if (hint) hint.style.display = "flex";
-      const gyroBtn = document.getElementById("btn-gyro");
-      if (gyroBtn) {
-        gyroBtn.classList.remove("active");
-        gyroBtn.textContent = "Quan sát";
-        gyroBtn.disabled = false;
-      }
-      // Ẩn popup khi reset
-      const popup = document.getElementById("info-popup");
-      popup?.classList.remove("visible");
-      popup?.setAttribute("aria-hidden", "true");
-      // Ẩn cụm điều khiển model
-      document.getElementById("model-controls")?.classList.remove("visible");
-    });
-
-    // Nút "Quan sát" – user chủ động bật gyro sau khi đã chỉnh xong góc nhìn
+  // ===== Reset =====
+  document.getElementById("btn-reset")?.addEventListener("click", async () => {
+    await engine.resetLock();
+    const hint = document.getElementById("scan-hint");
+    if (hint) hint.style.display = "flex";
     const gyroBtn = document.getElementById("btn-gyro");
     if (gyroBtn) {
-      gyroBtn.style.display = "block";
+      gyroBtn.classList.remove("active");
       gyroBtn.textContent = "Quan sát";
-      gyroBtn.addEventListener("click", async () => {
-        if (engine.isGyroEnabled?.()) return;
-        gyroBtn.disabled = true;
-        const ok = await engine.enableGyro();
-        gyroBtn.disabled = false;
-        if (ok) {
-          gyroBtn.classList.add("active");
-          gyroBtn.textContent = "Đang quan sát";
-          document.getElementById("model-controls")?.classList.add("visible");
-        } else {
-          gyroBtn.textContent = "Gyro lỗi";
-          // Vẫn cho điều khiển model thủ công
-          document.getElementById("model-controls")?.classList.add("visible");
-        }
-      });
+      gyroBtn.disabled = false;
     }
+    document.getElementById("info-popup")?.classList.remove("visible");
+    document.getElementById("model-controls")?.classList.remove("visible");
+  });
 
-    // Popup info: hiển thị khi tap vào model
-    const popup = document.getElementById("info-popup");
-    const popupTitle = document.getElementById("info-title");
-    const popupDesc = document.getElementById("info-desc");
-    const popupClose = document.getElementById("info-close");
+  // ===== Quan sát (gyro) =====
+  const gyroBtn = document.getElementById("btn-gyro");
+  if (gyroBtn) {
+    gyroBtn.style.display = "block";
+    gyroBtn.addEventListener("click", async () => {
+      if (engine.isGyroEnabled?.()) return;
+      // Yêu cầu phải có marker đang được tracking trước khi snapshot
+      if (!engine.hasTracking?.()) {
+        gyroBtn.textContent = "Cần quét marker trước";
+        setTimeout(() => (gyroBtn.textContent = "Quan sát"), 1800);
+        return;
+      }
+      gyroBtn.disabled = true;
+      const ok = await engine.enableGyro();
+      gyroBtn.disabled = false;
+      if (ok) {
+        gyroBtn.classList.add("active");
+        gyroBtn.textContent = "Đang quan sát";
+        document.getElementById("model-controls")?.classList.add("visible");
+      } else {
+        gyroBtn.textContent = "Gyro lỗi";
+        setTimeout(() => (gyroBtn.textContent = "Quan sát"), 1800);
+      }
+    });
+  }
 
-    const showPopup = (item) => {
-      const info = item?.def?.info;
-      if (!info || !popup) return;
-      popupTitle.textContent = info.title || "";
-      popupDesc.textContent = info.description || "";
-      popup.classList.add("visible");
-      popup.setAttribute("aria-hidden", "false");
+  // ===== Popup info khi tap vào model =====
+  const popup = document.getElementById("info-popup");
+  const popupTitle = document.getElementById("info-title");
+  const popupDesc = document.getElementById("info-desc");
+  const popupClose = document.getElementById("info-close");
+
+  engine.setOnTapItem?.((item) => {
+    const info = item?.def?.info;
+    if (!info || !popup) return;
+    popupTitle.textContent = info.title || "";
+    popupDesc.textContent = info.description || "";
+    popup.classList.add("visible");
+    popup.setAttribute("aria-hidden", "false");
+  });
+  popupClose?.addEventListener("click", () => {
+    popup?.classList.remove("visible");
+    popup?.setAttribute("aria-hidden", "true");
+  });
+
+  // ===== Cụm điều khiển model (xoay + zoom) =====
+  const controls = document.getElementById("model-controls");
+  if (controls) {
+    const ROT_STEP = 0.06;
+    const ZOOM_STEP = 1.04;
+    const TICK_MS = 30;
+    const actMap = {
+      "rot-left":  () => engine.rotateModel?.( ROT_STEP),
+      "rot-right": () => engine.rotateModel?.(-ROT_STEP),
+      "zoom-in":   () => engine.zoomModel?.(ZOOM_STEP),
+      "zoom-out":  () => engine.zoomModel?.(1 / ZOOM_STEP),
     };
-    const hidePopup = () => {
-      popup?.classList.remove("visible");
-      popup?.setAttribute("aria-hidden", "true");
-    };
-
-    engine.setOnTapItem?.(showPopup);
-    popupClose?.addEventListener("click", hidePopup);
-
-    // Cụm nút điều khiển model (xoay quanh up + zoom)
-    const modelControls = document.getElementById("model-controls");
-    if (modelControls) {
-      const ROT_STEP = 0.06;          // rad/tick (~3.4°)
-      const ZOOM_STEP = 1.04;         // /tick
-      const TICK_MS = 30;
-      const actMap = {
-        "rot-left":  () => engine.rotateModel?.( ROT_STEP),
-        "rot-right": () => engine.rotateModel?.(-ROT_STEP),
-        "zoom-in":   () => engine.zoomModel?.(ZOOM_STEP),
-        "zoom-out":  () => engine.zoomModel?.(1 / ZOOM_STEP),
+    controls.querySelectorAll(".ctrl-btn").forEach((btn) => {
+      const fn = actMap[btn.dataset.act];
+      if (!fn) return;
+      let timer = null;
+      const start = (e) => {
+        e.preventDefault();
+        if (timer) return;
+        fn();
+        timer = setInterval(fn, TICK_MS);
       };
-      modelControls.querySelectorAll(".ctrl-btn").forEach((btn) => {
-        const fn = actMap[btn.dataset.act];
-        if (!fn) return;
-        let timer = null;
-        const start = (e) => {
-          e.preventDefault();
-          if (timer) return;
-          fn();
-          timer = setInterval(fn, TICK_MS);
-        };
-        const stop = () => {
-          if (timer) { clearInterval(timer); timer = null; }
-        };
-        btn.addEventListener("pointerdown", start);
-        btn.addEventListener("pointerup", stop);
-        btn.addEventListener("pointerleave", stop);
-        btn.addEventListener("pointercancel", stop);
-      });
-    }
+      const stop = () => {
+        if (timer) { clearInterval(timer); timer = null; }
+      };
+      btn.addEventListener("pointerdown", start);
+      btn.addEventListener("pointerup", stop);
+      btn.addEventListener("pointerleave", stop);
+      btn.addEventListener("pointercancel", stop);
+    });
   }
 
   document.addEventListener("visibilitychange", async () => {
     if (document.hidden) await engine.stop();
     else await engine.start();
   });
-}
-
-async function startWorldMode() {
-  const engine = new GyroAREngine(arContainer, AR_CONFIG);
-  await engine.init(setProgress);
-  engine.start();
-
-  const models = AR_CONFIG.worldTracking?.models ?? [];
-  const picker = document.getElementById("model-picker");
-  if (picker && models.length > 1) {
-    models.forEach((m, i) => {
-      const btn = document.createElement("button");
-      btn.className = "picker-btn" + (i === 0 ? " active" : "");
-      btn.textContent = m.name || m.id;
-      btn.addEventListener("click", () => {
-        picker.querySelectorAll(".picker-btn").forEach((b) =>
-          b.classList.remove("active")
-        );
-        btn.classList.add("active");
-        engine.lookAtModel(i);
-      });
-      picker.appendChild(btn);
-    });
-  } else if (picker) {
-    picker.style.display = "none";
-  }
-
-  document
-    .getElementById("btn-reset")
-    ?.addEventListener("click", () => engine.lookAtModel(0));
-
-  const gyroBtn = document.getElementById("btn-gyro");
-  gyroBtn?.addEventListener("click", async () => {
-    const ok = await engine.enableGyro();
-    if (ok) {
-      gyroBtn.classList.add("active");
-      gyroBtn.textContent = "Gyro ✓";
-    }
-  });
-
-  window.addEventListener("pagehide", () => engine.dispose());
-
-  loadingOverlay.style.display = "none";
-  uiOverlay.style.display = "block";
-  document.body.classList.add("mode-world");
-}
-
-async function bootstrap() {
-  try {
-    const mode = AR_CONFIG.mode === "world" ? "world" : "image";
-    console.log("[CUSC-AR] mode =", mode);
-    if (mode === "world") await startWorldMode();
-    else await startImageMode();
-  } catch (err) {
-    console.error("CUSC-AR init failed:", err);
-    setProgress("Lỗi: " + err.message);
-  }
 }
 
 bootstrap();
