@@ -16,10 +16,16 @@
 
   <!-- UI overlay -->
   <div id="ui-overlay" style="display:none;">
+    <!-- Status pill (luôn hiện ở top center) -->
+    <div id="scan-status">Đang quét marker…</div>
+
+    <!-- Nút mở/đóng debug panel -->
+    <button id="btn-debug" type="button" title="Debug">≡</button>
+
     <!-- Image-tracking hint -->
     <div id="scan-hint">
       <img src="assets/icons/scan.svg" alt="scan" width="48" height="48" />
-      <p>Hướng camera vào ảnh Shrimp để spawn Spinosaurus</p>
+      <p>Hướng camera vào marker để spawn model</p>
     </div>
 
     <!-- World-tracking hint -->
@@ -51,8 +57,20 @@
       <p id="info-desc"></p>
     </div>
 
-    <!-- Debug overlay -->
-    <pre id="debug-overlay"></pre>
+    <!-- Debug panel (ẩn mặc định, mở bằng nút ≡) -->
+    <div id="debug-panel" hidden>
+      <div id="debug-tabs">
+        <button class="dbg-tab active" data-mode="stats" type="button">Stats</button>
+        <button class="dbg-tab"        data-mode="logs"  type="button">Logs</button>
+        <button class="dbg-tab"        data-mode="glb"   type="button">GLB</button>
+      </div>
+      <pre id="debug-overlay"></pre>
+      <div id="debug-actions">
+        <button id="dbg-force"    type="button">👁 Force show</button>
+        <button id="dbg-cycle"    type="button">→ Next anchor</button>
+        <button id="dbg-snap"     type="button">📸 Snapshot</button>
+      </div>
+    </div>
   </div>
 
   <!-- AR container – MindAR + Three.js will render here -->

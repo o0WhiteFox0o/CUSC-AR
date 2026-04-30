@@ -24,13 +24,28 @@ export class ModelLoader {
   /**
    * Tải model từ URL
    * @param {string} url
+   * @param {{ ignoreNodes?: string[] }=} opts
    * @returns {Promise<{scene: THREE.Group, animations: THREE.AnimationClip[]}>}
    */
-  load(url) {
+  load(url, opts = {}) {
+    const ignore = new Set((opts.ignoreNodes ?? []).map((s) => s.toLowerCase()));
     return new Promise((resolve, reject) => {
       this._loader.load(
         url,
-        (gltf) => resolve({ scene: gltf.scene, animations: gltf.animations }),
+        (gltf) => {
+          if (ignore.size > 0) {
+            const toRemove = [];
+            gltf.scene.traverse((obj) => {
+              const name = (obj.name || "").toLowerCase();
+              if (ignore.has(name)) toRemove.push(obj);
+            });
+            for (const obj of toRemove) {
+              console.log(`[ModelLoader] ${url}: removed node "${obj.name}"`);
+              obj.parent?.remove(obj);
+            }
+          }
+          resolve({ scene: gltf.scene, animations: gltf.animations });
+        },
         undefined,
         (err) => reject(err)
       );

@@ -16,7 +16,9 @@
 
 import * as THREE from "three";
 import { MindARThree } from "mind-ar/dist/mindar-image-three.prod.js";
+import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { ModelLoader } from "./model-loader.js";
+import { flattenTargets } from "./models.js";
 
 export class HybridAREngine {
   constructor(container, config) {
@@ -41,18 +43,28 @@ export class HybridAREngine {
     this._pointer = new THREE.Vector2();
     this._tapStart = null; // {x, y, t}
     this._onTapItem = null; // callback (item) => void
+
+    // Status + console mirror cho debug overlay
+    this._onStatus = null;
+    this._currentStatus = "idle";
+    this._logBuffer = []; // {ts, level, text}[]
+    this._installConsoleMirror();
+
+    // Force-show / manual-cycle (debug)
+    this._forceShowAll = false;
   }
 
   async init(onProgress = () => {}) {
     onProgress("Đang khởi tạo camera & AR engine...");
 
+    const t = this._config.tracking ?? {};
     this._mindarThree = new MindARThree({
       container: this._container,
       imageTargetSrc: this._config.mindFile,
-      filterMinCF: 0.0001,
-      filterBeta: 0.001,
-      warmupTolerance: 2,
-      missTolerance: 30,
+      filterMinCF: t.filterMinCF ?? 0.0001,
+      filterBeta: t.filterBeta ?? 0.001,
+      warmupTolerance: t.warmupTolerance ?? 2,
+      missTolerance: t.missTolerance ?? 30,
       uiLoading: "no",
       uiScanning: "no",
       uiError: "no",
@@ -72,30 +84,72 @@ export class HybridAREngine {
     dir.position.set(0.5, 1, 0.25);
     scene.add(dir);
 
-    const autoFitSize = this._config.autoFitSize ?? 0;
+    const globalAutoFit = this._config.autoFitSize ?? 0;
+    const targets = flattenTargets();
 
-    for (const target of this._config.targets) {
-      onProgress(`Đang tải model: ${target.modelUrl}`);
-      const anchor = this._mindarThree.addAnchor(target.targetIndex);
+    // Cache GLB theo modelDef.id để model 1 marker đầu tiên load, các marker
+    // sau dùng `cached.scene.clone()` (tiết kiệm băng thông + RAM).
+    const glbCache = new Map();
+
+    for (const tgt of targets) {
+      const def = tgt.modelDef;
+      onProgress(`Đang tải model: ${def.name} (target ${tgt.targetIndex})`);
+      const anchor = this._mindarThree.addAnchor(tgt.targetIndex);
 
       try {
-        const { scene: modelScene, animations } = await this._modelLoader.load(
-          target.modelUrl
-        );
+        let cached = glbCache.get(def.id);
+        if (!cached) {
+          cached = await this._modelLoader.load(def.modelUrl, {
+            ignoreNodes: def.ignoreNodes,
+          });
+          glbCache.set(def.id, cached);
+        }
+        const modelScene = cloneSkinned(cached.scene);
+        const animations = cached.animations;
 
-        const { position: p, rotation: r, scale: s } = target;
+        // Default rotation: floor → đứng thẳng (π/2 quanh X), wall → giữ nguyên
+        const defaultRotX = tgt.surface === "wall" ? 0 : Math.PI / 2;
+        const p = def.position ?? { x: 0, y: 0, z: 0 };
+        const r = def.rotation;
+        const s = def.scale ?? { x: 1, y: 1, z: 1 };
         modelScene.position.set(p.x, p.y, p.z);
-        modelScene.rotation.set(r.x, r.y, r.z);
+        modelScene.rotation.set(
+          r?.x ?? defaultRotX,
+          r?.y ?? 0,
+          r?.z ?? 0
+        );
         modelScene.scale.set(s.x, s.y, s.z);
 
-        if (autoFitSize > 0) {
+        const autoFit = def.autoFitSize ?? globalAutoFit;
+        if (autoFit > 0) {
           const box = new THREE.Box3().setFromObject(modelScene);
           const size = box.getSize(new THREE.Vector3());
           const maxDim = Math.max(size.x, size.y, size.z);
-          if (maxDim > 0) {
-            modelScene.scale.multiplyScalar(autoFitSize / maxDim);
-          }
+          if (maxDim > 0) modelScene.scale.multiplyScalar(autoFit / maxDim);
         }
+
+        // Inspect mesh để debug + ép DoubleSide
+        const meshSummary = [];
+        let meshCount = 0, totalTris = 0;
+        modelScene.traverse((o) => {
+          if (o.isMesh) {
+            meshCount++;
+            const g = o.geometry;
+            const tris = g?.index
+              ? g.index.count / 3
+              : (g?.attributes?.position?.count ?? 0) / 3;
+            totalTris += tris | 0;
+            const mat = Array.isArray(o.material) ? o.material[0] : o.material;
+            meshSummary.push(`${o.name}|${tris | 0}|${mat?.type ?? "?"}`);
+            if (mat) {
+              mat.side = THREE.DoubleSide;
+              mat.needsUpdate = true;
+            }
+            o.frustumCulled = false;
+          }
+        });
+        const bbox = new THREE.Box3().setFromObject(modelScene);
+        const bsize = bbox.getSize(new THREE.Vector3());
 
         const wrapper = new THREE.Group();
         wrapper.add(modelScene);
@@ -103,38 +157,55 @@ export class HybridAREngine {
         scene.add(wrapper);
 
         const item = {
-          targetIndex: target.targetIndex,
+          targetIndex: tgt.targetIndex,
+          surface: tgt.surface,
+          def,
           anchor,
           wrapper,
           modelScene,
-          def: target,
           locked: false,
           tracking: false,
+          userZoom: 1,
+          glbInfo: {
+            meshCount,
+            totalTris,
+            meshes: meshSummary,
+            bbox: `${bsize.x.toFixed(2)}x${bsize.y.toFixed(2)}x${bsize.z.toFixed(2)}`,
+          },
         };
 
         anchor.onTargetFound = () => {
           item.tracking = true;
           item.wrapper.visible = true;
+          this._setStatus(`Thấy: ${def.name} (${tgt.surface === "floor" ? "sàn" : "tường"})`);
         };
         anchor.onTargetLost = () => {
           item.tracking = false;
+          if (!this._items.some((i) => i.tracking)) {
+            this._setStatus("Đang quét marker…");
+          }
         };
 
         item.animations = animations;
-        item.currentClipIndex =
-          typeof target.animation === "number" ? target.animation : 0;
+        const animKey = def.defaultAnimation;
+        const animRef = animKey && def.animations ? def.animations[animKey] : null;
+        item.currentClipIndex = typeof animRef === "number" ? animRef : 0;
 
-        if (target.animation != null && animations.length > 0) {
+        if (animRef != null && animations.length > 0) {
           item.mixer = this._modelLoader.playAnimation(
             modelScene,
             animations,
-            target.animation
+            animRef
           );
         }
 
         this._items.push(item);
+        console.log(
+          `[HybridAR] +target ${tgt.targetIndex} ${def.id}/${tgt.surface} ` +
+          `meshes=${meshCount} tris=${totalTris} bbox=${item.glbInfo.bbox}`
+        );
       } catch (err) {
-        console.error(`Không thể tải model ${target.modelUrl}:`, err);
+        console.error(`Không thể tải model ${def.modelUrl}:`, err);
       }
     }
 
@@ -147,6 +218,7 @@ export class HybridAREngine {
 
     renderer.setAnimationLoop(() => this._frame());
 
+    this._setStatus("Đang quét marker…");
     onProgress("Sẵn sàng!");
   }
 
@@ -196,7 +268,164 @@ export class HybridAREngine {
     this._debugEl = el;
   }
 
+  /** Đăng ký callback nhận status text (cho UI pill). */
+  setOnStatus(cb) { this._onStatus = cb; this._setStatus(this._currentStatus); }
+  _setStatus(s) {
+    this._currentStatus = s;
+    this._onStatus?.(s);
+  }
+
+  /** Capture console.log/warn/error vào _logBuffer (max 30 entries). */
+  _installConsoleMirror() {
+    const orig = {};
+    ["log", "warn", "error", "info"].forEach((lvl) => {
+      orig[lvl] = console[lvl].bind(console);
+      console[lvl] = (...args) => {
+        try {
+          const text = args
+            .map((a) => {
+              if (typeof a === "string") return a;
+              try { return JSON.stringify(a); } catch { return String(a); }
+            })
+            .join(" ");
+          this._logBuffer.push({ ts: performance.now() | 0, level: lvl, text });
+          if (this._logBuffer.length > 30) this._logBuffer.shift();
+        } catch (_) {}
+        orig[lvl](...args);
+      };
+    });
+  }
+
+  /** Mode hiển thị overlay debug: "stats" | "logs" | "glb" */
+  setDebugMode(mode) { this._debugMode = mode; }
+
   _updateDebug() {
+    if (!this._debugEl) return;
+    const mode = this._debugMode || "stats";
+    const lines = [];
+
+    if (mode === "logs") {
+      lines.push(`[LOGS] (${this._logBuffer.length} entries)`);
+      const recent = this._logBuffer.slice(-20);
+      for (const e of recent) {
+        const t = (e.ts / 1000).toFixed(1);
+        lines.push(`${t}s ${e.level.toUpperCase()}  ${e.text.slice(0, 80)}`);
+      }
+      this._debugEl.textContent = lines.join("\n");
+      return;
+    }
+
+    if (mode === "glb") {
+      lines.push(`[GLB INFO]`);
+      for (const it of this._items) {
+        lines.push(`--- ${it.def.id}/${it.surface} (idx ${it.targetIndex}) ---`);
+        lines.push(`  meshes=${it.glbInfo.meshCount}  tris=${it.glbInfo.totalTris}`);
+        lines.push(`  bbox=${it.glbInfo.bbox}`);
+        it.glbInfo.meshes.slice(0, 3).forEach((s) => lines.push(`  · ${s}`));
+        if (it.glbInfo.meshes.length > 3) {
+          lines.push(`  · …+${it.glbInfo.meshes.length - 3}`);
+        }
+      }
+      this._debugEl.textContent = lines.join("\n");
+      return;
+    }
+
+    // mode === "stats" (default): tracking + transform stats
+    const fmt = (v) => `${v.x.toFixed(1)}, ${v.y.toFixed(1)}, ${v.z.toFixed(1)}`;
+    lines.push(
+      `gyro=${this._gyroEnabled} force=${this._forceShowAll}  status=${this._currentStatus}`
+    );
+    if (this._camera) {
+      lines.push(
+        `cam pos=${fmt(this._camera.position)}  near=${this._camera.near.toFixed(0)} far=${this._camera.far.toFixed(0)}`
+      );
+    }
+    if (this._renderer) {
+      const sz = this._renderer.getSize(new THREE.Vector2());
+      lines.push(
+        `renderer ${sz.x}x${sz.y}  pr=${this._renderer.getPixelRatio().toFixed(2)}`
+      );
+    }
+    for (const it of this._items) {
+      const tag = it.tracking ? "✓" : "·";
+      lines.push(
+        `${tag} idx${it.targetIndex} ${it.def.id}/${it.surface}  locked=${it.locked} vis=${it.wrapper.visible}`
+      );
+      if (it.tracking || it.locked || it.wrapper.visible) {
+        it.wrapper.updateMatrixWorld(true);
+        const wp = new THREE.Vector3(), wq = new THREE.Quaternion(), ws = new THREE.Vector3();
+        it.wrapper.matrixWorld.decompose(wp, wq, ws);
+        lines.push(`   wrap.world pos=${fmt(wp)} scale=${fmt(ws)}`);
+      }
+    }
+    this._debugEl.textContent = lines.join("\n");
+  }
+
+  // ===== Mobile test helpers =======================================
+  /** Bật/tắt force-show: hiện toàn bộ wrapper bất kể tracking. */
+  toggleForceShow() {
+    this._forceShowAll = !this._forceShowAll;
+    if (this._forceShowAll) {
+      // Đặt mỗi wrapper ở trước camera, cách 1 marker-width, để dễ thấy
+      this._items.forEach((it, i) => {
+        it.wrapper.visible = true;
+        it.wrapper.position.set((i - (this._items.length - 1) / 2) * 0.5, 0, -1);
+        it.wrapper.quaternion.identity();
+        it.wrapper.scale.set(0.3, 0.3, 0.3);
+        it.locked = true; // ngăn frame loop ghi đè
+      });
+    } else {
+      // Trả về scan mode
+      this._items.forEach((it) => {
+        it.wrapper.visible = false;
+        it.locked = false;
+        it.tracking = false;
+      });
+    }
+    return this._forceShowAll;
+  }
+
+  /** Quét vòng anchor: hiện 1 model duy nhất ở vị trí giữa camera (debug). */
+  cycleNextAnchor() {
+    if (!this._items.length) return;
+    this._cycleIdx = (this._cycleIdx ?? -1) + 1;
+    if (this._cycleIdx >= this._items.length) this._cycleIdx = 0;
+    this._items.forEach((it, i) => {
+      const active = i === this._cycleIdx;
+      it.wrapper.visible = active;
+      it.locked = active;
+      if (active) {
+        it.wrapper.position.set(0, 0, -1);
+        it.wrapper.quaternion.identity();
+        it.wrapper.scale.set(0.3, 0.3, 0.3);
+      }
+    });
+    const it = this._items[this._cycleIdx];
+    return `${it.def.id}/${it.surface} (idx ${it.targetIndex})`;
+  }
+
+  /** Tải snapshot canvas hiện tại về máy (PNG). */
+  saveSnapshot() {
+    if (!this._renderer) return;
+    // Lấy canvas của MindAR (bao gồm video bg) thay vì chỉ renderer
+    const canvases = this._container.querySelectorAll("canvas");
+    if (!canvases.length) return;
+    // Compose tất cả canvas vào 1 canvas tạm
+    const main = canvases[canvases.length - 1];
+    const w = main.width, h = main.height;
+    const out = document.createElement("canvas");
+    out.width = w; out.height = h;
+    const ctx = out.getContext("2d");
+    canvases.forEach((c) => {
+      try { ctx.drawImage(c, 0, 0, w, h); } catch (_) {}
+    });
+    const a = document.createElement("a");
+    a.download = `cusc-ar-${Date.now()}.png`;
+    a.href = out.toDataURL("image/png");
+    a.click();
+  }
+
+  _updateDebugLegacy() {
     const fmt = (v) =>
       `${v.x.toFixed(3)}, ${v.y.toFixed(3)}, ${v.z.toFixed(3)}`;
     const fmtQ = (q) =>

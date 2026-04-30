@@ -1,19 +1,23 @@
-# CUSC-AR – Web AR Image Tracking
+# CUSC-AR – Web AR cho trưng bày khủng long
 
-Ứng dụng **Web AR** hiển thị model 3D khi camera quét qua ảnh mục tiêu (image target).  
+Ứng dụng **Web AR** hiển thị model 3D khủng long khi camera quét ảnh marker (sàn / tường).
 Chạy trực tiếp trên trình duyệt mobile – **không cần cài app**.
+
+> Chi tiết kiến trúc xem [`docs/DESIGN-functional.md`](docs/DESIGN-functional.md).
+> Lý do chọn multi-target xem [`docs/REPORT-multi-target-merge.md`](docs/REPORT-multi-target-merge.md).
 
 ---
 
-## Công nghệ sử dụng
+## Công nghệ
 
 | Thành phần | Công nghệ | Phiên bản |
 |---|---|---|
 | AR Engine | [MindAR.js](https://hiukim.github.io/mind-ar-js-doc/) | 1.2.5 |
 | 3D Rendering | [Three.js](https://threejs.org/) | 0.153.x |
-| Bundler / Dev Server | [Vite](https://vitejs.dev/) | 5.4.x |
-| HTTPS (dev) | [@vitejs/plugin-basic-ssl](https://github.com/nicolo-ribaudo/vite-plugin-basic-ssl) | 1.1.x |
-| Model Format | GLTF / GLB | — |
+| Bundler | [Vite](https://vitejs.dev/) | 5.4.x |
+| HTTPS dev | `@vitejs/plugin-basic-ssl` | 1.1.x |
+| Compiler marker | `playwright-core` (msedge headless) | 1.59.x |
+| Model | GLTF / GLB (DRACO) | — |
 
 ---
 
@@ -21,185 +25,61 @@ Chạy trực tiếp trên trình duyệt mobile – **không cần cài app**.
 
 ```
 CUSC-AR/
-├── index.html                  # Trang HTML chính
-├── package.json                # Dependencies & scripts
-├── vite.config.js              # Cấu hình Vite (HTTPS, port)
+├── index.html
+├── package.json
+├── vite.config.js
 ├── README.md
 │
-├── assets/
-│   ├── icons/
-│   │   └── scan.svg            # Icon gợi ý scan
-│   ├── models/
-│   │   └── AM_Shrimp.glb       # Model 3D (con tôm)
-│   └── targets/
-│       └── Shrimp.mind         # File image target đã biên dịch
+├── docs/
+│   ├── DESIGN-functional.md          # Thiết kế chức năng
+│   └── REPORT-multi-target-merge.md  # Báo cáo gộp marker
+│
+├── scripts/
+│   └── compile-mind.mjs              # Build targets.mind từ PNG
+│
+├── public/
+│   └── assets/
+│       ├── models/
+│       │   ├── spinosaurus-idle.glb
+│       │   └── Triceratops_idle.glb
+│       └── targets/
+│           ├── targets.mind          # 4 markers trong 1 file
+│           └── images/
+│               ├── spinosaurus-floor.png   (targetIndex 0)
+│               ├── spinosaurus-wall.png    (targetIndex 1)
+│               ├── triceratops-floor.png   (targetIndex 2)
+│               └── triceratops-wall.png    (targetIndex 3)
 │
 └── src/
-    ├── main.js                 # Entry point – khởi chạy app
-    ├── ar-config.js            # ⚙️ CẤU HÌNH: map ảnh → model
-    ├── ar-engine.js            # MindAR + Three.js engine
-    ├── model-loader.js         # GLTF/GLB loader + animation manager
-    └── styles/
-        └── main.css            # Giao diện (loading, UI overlay)
+    ├── main.js                       # Wire UI ↔ engine
+    ├── ar-config.js                  # Config tracking
+    ├── models.js                     # Registry model + marker
+    ├── ar-engine-hybrid.js           # Engine chính (MindAR + Three.js)
+    ├── ar-engine.js                  # Engine cũ "image-strict"
+    ├── ar-engine-gyro.js             # Engine "world" gyro
+    ├── ar-engine-webxr.js            # Stub WebXR
+    ├── model-loader.js               # GLB loader + animation + ignoreNodes
+    └── styles/main.css
 ```
 
 ---
 
 ## Cài đặt & Chạy
 
-### Yêu cầu
-
-- [Node.js](https://nodejs.org/) >= 18
-
-### Các bước
-
 ```bash
-# 1. Cài dependencies
 npm install --ignore-scripts
-
-# 2. Chạy dev server (HTTPS + mở cho mạng LAN)
 npm run dev
 ```
 
-Kết quả:
-
-```
-VITE ready
-➜  Local:   https://localhost:8443/
-➜  Network: https://192.168.x.x:8443/
-```
+Vite ready trên `https://localhost:8443/` và `https://<LAN-IP>:8443/`.
 
 ### Mở trên điện thoại
+1. Cùng WiFi với máy dev.
+2. Vào `https://<LAN-IP>:8443/`.
+3. Bypass cảnh báo cert tự ký → cho phép Camera.
+4. Chĩa vào ảnh marker → model 3D hiện trên marker.
 
-1. Đảm bảo điện thoại **cùng mạng WiFi** với máy tính
-2. Mở trình duyệt trên điện thoại, nhập `https://<IP-máy-tính>:8443`
-3. Trình duyệt sẽ cảnh báo certificate tự ký → nhấn **"Advanced"** → **"Proceed"**
-4. Cho phép quyền **Camera** khi được hỏi
-5. Hướng camera vào ảnh mục tiêu → model 3D sẽ xuất hiện
-
-> **Lưu ý:** Camera trên mobile **bắt buộc HTTPS**. Plugin `basic-ssl` của Vite tự tạo certificate.
-
----
-
-## Cấu hình (`src/ar-config.js`)
-
-Đây là file duy nhất bạn cần chỉnh sửa khi thêm/bớt target.
-
-```js
-const AR_CONFIG = {
-  // Đường dẫn tới file .mind
-  mindFile: "assets/targets/Shrimp.mind",
-
-  targets: [
-    {
-      targetIndex: 0,                           // Index ảnh trong file .mind
-      modelUrl: "assets/models/AM_Shrimp.glb",  // Model 3D tương ứng
-      position: { x: 0, y: 0, z: 0 },          // Vị trí
-      rotation: { x: 0, y: 0, z: 0 },          // Góc xoay (radian)
-      scale:    { x: 0.5, y: 0.5, z: 0.5 },    // Tỷ lệ
-      animation: null,                           // Animation clip (xem bên dưới)
-    },
-  ],
-};
-```
-
-### Các trường cấu hình
-
-| Trường | Kiểu | Mô tả |
-|---|---|---|
-| `targetIndex` | `number` | Thứ tự ảnh khi biên dịch file `.mind` (bắt đầu từ 0) |
-| `modelUrl` | `string` | Đường dẫn tới file `.glb` hoặc `.gltf` |
-| `position` | `{x,y,z}` | Vị trí model so với ảnh target |
-| `rotation` | `{x,y,z}` | Góc xoay (đơn vị radian) |
-| `scale` | `{x,y,z}` | Tỷ lệ phóng to / thu nhỏ |
-| `animation` | `null \| string \| number` | `null` = không animation, `"Idle"` = theo tên, `0` = theo index |
-
----
-
-## Hướng dẫn mở rộng (nhiều ảnh – nhiều model)
-
-### Bước 1: Biên dịch nhiều ảnh thành file `.mind`
-
-1. Truy cập **[MindAR Image Target Compiler](https://hiukim.github.io/mind-ar-js-doc/tools/compile)**
-2. Nhấn **"+"** để upload **nhiều ảnh** cùng lúc (ảnh 1, ảnh 2, ảnh 3...)
-3. Nhấn **"Start"** để biên dịch
-4. Tải file `.mind` về → đặt vào `assets/targets/`
-
-> **Mẹo chọn ảnh tốt:** Ảnh nên có nhiều chi tiết, tương phản cao, không đối xứng, kích thước >= 400×400px.
-
-### Bước 2: Thêm model 3D
-
-Đặt các file `.glb` vào `assets/models/`:
-```
-assets/models/
-├── AM_Shrimp.glb     # Model cho ảnh 1
-├── robot.glb          # Model cho ảnh 2
-└── flower.glb         # Model cho ảnh 3
-```
-
-> Model nên dưới **5MB** để tải nhanh trên mobile. Nguồn model miễn phí: [Sketchfab](https://sketchfab.com), [Poly Pizza](https://poly.pizza), [Kenney](https://kenney.nl/assets)
-
-### Bước 3: Cập nhật cấu hình
-
-Mở `src/ar-config.js`, thêm entry cho từng ảnh:
-
-```js
-const AR_CONFIG = {
-  mindFile: "assets/targets/multi-targets.mind",
-
-  targets: [
-    {
-      targetIndex: 0,                           // Ảnh thứ 1
-      modelUrl: "assets/models/AM_Shrimp.glb",
-      position: { x: 0, y: 0, z: 0 },
-      rotation: { x: 0, y: 0, z: 0 },
-      scale: { x: 0.5, y: 0.5, z: 0.5 },
-      animation: null,
-    },
-    {
-      targetIndex: 1,                           // Ảnh thứ 2
-      modelUrl: "assets/models/robot.glb",
-      position: { x: 0, y: 0, z: 0 },
-      rotation: { x: 0, y: 0, z: 0 },
-      scale: { x: 0.3, y: 0.3, z: 0.3 },
-      animation: 0,                             // Phát animation đầu tiên
-    },
-    {
-      targetIndex: 2,                           // Ảnh thứ 3
-      modelUrl: "assets/models/flower.glb",
-      position: { x: 0, y: 0.1, z: 0 },
-      rotation: { x: 0, y: 0, z: 0 },
-      scale: { x: 1, y: 1, z: 1 },
-      animation: "Bloom",                       // Phát animation tên "Bloom"
-    },
-  ],
-};
-```
-
-**Quy tắc:** `targetIndex` phải khớp với thứ tự ảnh khi upload lên MindAR Compiler (bắt đầu từ 0).
-
-### Bước 4: Chạy lại
-
-```bash
-npm run dev
-```
-
-Giờ khi quét ảnh 1 → hiện model tôm, quét ảnh 2 → hiện robot, quét ảnh 3 → hiện hoa.
-
----
-
-## Giải thích luồng hoạt động
-
-```
-Camera mở → MindAR phân tích frame → Nhận diện ảnh target
-    → Lấy targetIndex → Hiển thị model 3D tương ứng trên ảnh
-    → Camera mất ảnh → Ẩn model
-```
-
-1. **`main.js`** – Khởi tạo `AREngine`, bắt đầu tracking, xử lý sự kiện UI
-2. **`ar-engine.js`** – Tạo MindAR instance, setup Three.js scene (ánh sáng, renderer), tạo anchor cho mỗi target
-3. **`model-loader.js`** – Tải file GLB/GLTF bằng `GLTFLoader`, quản lý animation qua `AnimationMixer`
-4. **`ar-config.js`** – File cấu hình duy nhất, map targetIndex → model
+> Camera mobile **bắt buộc HTTPS**. Plugin `basic-ssl` tự tạo cert.
 
 ---
 
@@ -207,9 +87,92 @@ Camera mở → MindAR phân tích frame → Nhận diện ảnh target
 
 | Lệnh | Mô tả |
 |---|---|
-| `npm run dev` | Chạy dev server HTTPS tại port 8443, mở cho LAN |
-| `npm run build` | Build production vào thư mục `dist/` |
-| `npm run preview` | Preview bản build production |
+| `npm run dev` | Dev server HTTPS port 8443 (mở cho LAN) |
+| `npm run build` | Build production vào `dist/` |
+| `npm run preview` | Preview bản build |
+| `npm run compile-mind` | Compile PNG ở `public/assets/targets/images/` → `targets.mind` |
+
+---
+
+## Thêm model / marker mới
+
+### 1. Bỏ ảnh marker
+Đặt PNG vào `public/assets/targets/images/`.
+
+### 2. Khai báo trong `scripts/compile-mind.mjs`
+```js
+const MARKERS = [
+  "spinosaurus-floor.png",   // → targetIndex 0
+  "spinosaurus-wall.png",    // → targetIndex 1
+  "triceratops-floor.png",   // → targetIndex 2
+  "triceratops-wall.png",    // → targetIndex 3
+  "your-new-marker.png",     // → targetIndex 4
+];
+```
+Thứ tự = `targetIndex` runtime.
+
+### 3. Compile
+```bash
+npm run compile-mind
+```
+⇒ `public/assets/targets/targets.mind` được tạo lại.
+
+### 4. Khai báo model trong `src/models.js`
+```js
+{
+  id: "your-model",
+  name: "Your Model",
+  modelUrl: "assets/models/your-model.glb",
+  ignoreNodes: ["Plane"],          // tên node trong GLB cần xoá khi load
+  animations: { idle: 0 },
+  defaultAnimation: "idle",
+  autoFitSize: 1.5,
+  position: { x: 0, y: 0, z: 0 },
+  rotation: null,                  // null → auto: floor=π/2 quanh X, wall=0
+  scale: { x: 1, y: 1, z: 1 },
+  info: { title: "...", description: "..." },
+  targets: [
+    { targetIndex: 4, surface: "floor" },
+  ],
+},
+```
+
+### 5. Reload trang
+Engine tự `addAnchor(targetIndex)` cho mọi entry trong `flattenTargets()`.
+
+---
+
+## Cấu hình tracking (`src/ar-config.js`)
+
+```js
+{
+  mindFile: "assets/targets/targets.mind",
+  autoFitSize: 1.5,                 // override per-model trong models.js
+  tracking: {
+    filterMinCF: 0.0001,
+    filterBeta: 0.001,
+    warmupTolerance: 2,
+    missTolerance: 30,
+  },
+}
+```
+
+---
+
+## Debug trên mobile
+
+Nút **☰** góc trên-trái mở debug panel:
+
+| Tab / Nút | Tác dụng |
+|---|---|
+| **Stats** | Tracking + transform real-time mỗi item |
+| **Logs** | 20 dòng `console.*` cuối (thay F12) |
+| **GLB** | Mesh count / tris / bbox của mỗi GLB |
+| **👁 Force show** | Hiện toàn bộ model trước camera (test render) |
+| **→ Next anchor** | Lần lượt hiện từng anchor (test riêng từng GLB) |
+| **📸 Snapshot** | Tải PNG canvas hiện tại |
+
+Status pill ở giữa trên: cam = đang quét, xanh = đã thấy + tên model + mặt phẳng.
 
 ---
 
@@ -227,14 +190,15 @@ Camera mở → MindAR phân tích frame → Nhận diện ảnh target
 
 ## Xử lý lỗi thường gặp
 
-| Vấn đề | Nguyên nhân & Giải pháp |
+| Vấn đề | Giải pháp |
 |---|---|
-| Camera không mở | Phải dùng HTTPS. Kiểm tra quyền camera trong cài đặt trình duyệt |
-| Model không hiện khi quét | Kiểm tra `modelUrl` trong `ar-config.js` có đúng tên file không |
-| Quét ảnh nhưng không nhận | Ảnh target quá đơn giản / đối xứng / ít chi tiết. Biên dịch lại với ảnh tốt hơn |
-| Lag trên điện thoại | Giảm kích thước model (< 5MB), giảm polygon count |
-| `npm install` lỗi `canvas` | Chạy `npm install --ignore-scripts` (canvas chỉ cần cho server-side, không ảnh hưởng AR) |
-| Vite báo port đang dùng | Đổi port trong `vite.config.js` → `server.port` |
+| Camera không mở | Phải HTTPS. Kiểm tra quyền camera. |
+| Model không hiện khi quét | Mở debug ☰ → Logs xem error. Bấm 👁 Force show để test render độc lập. |
+| Quét ảnh nhưng không nhận | Ảnh marker quá đơn giản / đối xứng. Compile lại với ảnh chi tiết hơn. |
+| Lag trên điện thoại | Giảm GLB (< 5MB), bật Draco compression. |
+| `npm install` lỗi `canvas` | `npm install --ignore-scripts`. |
+| Vite báo port đang dùng | Đổi `server.port` trong `vite.config.js`. |
+| Skinned model render lệch / invisible | **Phải dùng `SkeletonUtils.clone`** thay cho `scene.clone(true)` khi share GLB cho nhiều marker. |
 
 ---
 

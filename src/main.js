@@ -36,6 +36,42 @@ async function startImageMode() {
   const debugEl = document.getElementById("debug-overlay");
   if (debugEl && engine.enableDebug) engine.enableDebug(debugEl);
 
+  // Status pill
+  const statusEl = document.getElementById("scan-status");
+  if (statusEl && engine.setOnStatus) {
+    engine.setOnStatus((s) => {
+      statusEl.textContent = s;
+      statusEl.classList.toggle("tracking", /Thấy/.test(s));
+    });
+  }
+
+  // Debug panel: toggle + tabs + actions
+  const debugPanel = document.getElementById("debug-panel");
+  const btnDebug = document.getElementById("btn-debug");
+  btnDebug?.addEventListener("click", () => {
+    if (!debugPanel) return;
+    debugPanel.hidden = !debugPanel.hidden;
+  });
+  document.querySelectorAll(".dbg-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".dbg-tab").forEach((t) => t.classList.remove("active"));
+      tab.classList.add("active");
+      engine.setDebugMode?.(tab.dataset.mode);
+    });
+  });
+  const dbgForce = document.getElementById("dbg-force");
+  dbgForce?.addEventListener("click", () => {
+    const on = engine.toggleForceShow?.();
+    dbgForce.classList.toggle("active", !!on);
+  });
+  document.getElementById("dbg-cycle")?.addEventListener("click", () => {
+    const txt = engine.cycleNextAnchor?.();
+    if (txt) statusEl && (statusEl.textContent = `[debug] ${txt}`);
+  });
+  document.getElementById("dbg-snap")?.addEventListener("click", () => {
+    engine.saveSnapshot?.();
+  });
+
   loadingOverlay.style.display = "none";
   uiOverlay.style.display = "block";
   document.body.classList.add("mode-image");
